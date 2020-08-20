@@ -1,0 +1,230 @@
+#include <Wire.h> //importing Wire library for I2C communication
+#include <IRremote.h> // Importing IR remote library for I2C communication
+/*Variables for IR remote*/
+int receiver=A1;
+IRrecv irrecv(receiver);     // create instance of 'irrecv'
+decode_results results;      // create instance of 'decode_results'
+int irValue;
+/*Variables for HV892*/
+int lens_address = 0x23;//address of lens binary: 0100011  = 35
+int AMP = 0;
+float tempAMP=0;// variable controlling lens
+float vO=0;
+/*Variables for Mode Indicator*/
+int problemLED=26;
+int enterLED=27;
+int rangeLED=28; //LED for range indicator is attached to Arduino pin 30
+int perscriptionLED=29; //LED for range indicator is attached to Arduino pin 31
+boolean range=0; //Boolean variable to idicate which mode the code is excecuting 
+boolean perscription=0; //Boolean variable to idicate which mode the code is excecuting 
+/*Variables for Tactile switches*/
+int upButtonPin=32; //Up button for range indicator is attached to Arduino pin 32
+int downButtonPin=33; //Down button for range indicator is attached to Arduino pin 33
+int enterButtonPin=34; //Enter button for range indicator is attached to Arduino pin 34
+int upButtonState=0; //Variable indicating weather the button has been pressed
+int downButtonState=0; //Variable indicating weather the button has been pressed
+int enterButtonState=0; //Variable indicating weather the button has been pressed
+/*Variables for range Mode*/
+float voltageIncrement=0.5;//---------------------------------------------------------------ENTER INCREMENTS
+float rightPower;
+/*Variables for perscription Mode*/
+int perscriptionNum=1;
+float fixedRightPower[7] = {-14.6447,-11.82620625,-9.0077125,-6.18921875,-3.370725,-0.55223125,2.2662625};//----------------------------------------------------------------ENTER PERSCRIPTION 1
+int temp=7;//------------------------------------------------------------------------------------ENTER # OF PERSCRIPTIONS
+float rightVoltage=0;
+float tempRightPower;
+int i=1;
+void setup() {
+Wire.begin();
+irrecv.enableIRIn();
+Serial.begin(9600); // Start serial communication at 9600
+pinMode(rangeLED, OUTPUT); //Declare range LED as an Output
+pinMode(perscriptionLED, OUTPUT); //Declare perscriptionLED as an Output
+pinMode(upButtonPin, INPUT); //Declare upButtonPin as an Output
+pinMode(downButtonPin, INPUT); //Declare downButtonPin as an Output
+}
+
+void loop() {
+  upButtonState = 0;
+  downButtonState = 0;
+  enterButtonState = 0;
+  digitalWrite(enterLED, HIGH); //Turn on enter indicator Light
+  while (upButtonState==0 && downButtonState==0 && enterButtonState==0) { //Wait for user input
+    measure();
+  }
+  //--------------------------------------------------------------------------------------------------MODE 1
+  if (upButtonState==1) { //Send to range Mode
+    digitalWrite(enterLED, LOW); //Turn off enter indicator Light
+    upButtonState = 0;
+    downButtonState = 0;
+    range=1; //Set Boolean variable(range) to 1 to indicate the mode
+    digitalWrite(rangeLED, HIGH); //Turn on range indicator Light 
+    ranges();
+    digitalWrite(rangeLED, LOW); //Turn of range LED Light
+  }
+  //---------------------------------------------------------------------------------------------------------------MODE 2
+  if (downButtonState==1) { //Send to perscription Mode
+    digitalWrite(enterLED, HIGH);
+    upButtonState = 0;
+    downButtonState = 0;
+    perscription=1; //Set Boolean variable(perscription) to 1 to indicate the mode
+    digitalWrite(perscriptionLED, HIGH); //Turn on perscription indicator Light
+    perscriptions();
+    enterButtonState = 0;
+    digitalWrite(perscriptionLED, LOW); //Turn of range LED Light
+  }
+  //--------------------------------------------------------------------------------------------------------------MODE 3
+  if (enterButtonState==1) { //Send to Main Mode
+    upButtonState = 0;
+    downButtonState = 0;
+    enterButtonState = 0;
+    rightVoltage=(fixedRightPower[i]+17.8150)/0.3235;
+    while (enterButtonState==0) { //Wait for user input
+      enterButtonState = digitalRead(enterButtonPin); //Measure user input for enter button
+    }
+  }
+} 
+// Void Range
+void ranges(){
+  while (enterButtonState==0) { //Wait for user input
+        measure();
+        if (upButtonState==1) {
+          tempAMP=tempAMP+voltageIncrement;
+          upButtonState = 0;
+        }
+        if (downButtonState==1) {
+          tempAMP=tempAMP-voltageIncrement;
+          downButtonState = 0;
+        }
+        lens();
+      }
+      enterButtonState=0;
+      rightPower=(0.3235*(9.8+AMP*.205))-17.8150;
+      Serial.print("Power of Eye: ");
+      Serial.print(rightPower);
+      Serial.println(" Diopters");
+      delay(500);
+} 
+// Void Lens
+void perscriptions() { 
+    while (enterButtonState==0) { //Wait for user input
+     tempRightPower=fixedRightPower[i];
+     rightVoltage=(tempRightPower+17.8150)/0.3235;
+     tempAMP=(rightVoltage-9.8)/.205;
+     Serial.print("Power: ");
+     Serial.print(tempRightPower);
+     Serial.print(" Diopters           ");
+     Serial.print("Necessary Voltage: ");
+     Serial.print(rightVoltage);
+     Serial.print(" V          ");
+     Serial.print("temp AMP: ");
+     Serial.println(tempAMP);
+     lens();
+     measure();
+     if(upButtonState==1){
+        upButtonState=0;
+        if(i<temp){
+          i=i+1;
+          Serial.println("");
+          Serial.print("Perscription Number: ");
+          Serial.println(i);
+          Serial.println("");
+          delay(1000);
+        }
+        else{
+          Serial.println("");
+          Serial.println("Perscription Number is out of range");
+          Serial.println("");
+          delay(1000);
+        }
+      }
+      if(downButtonState==1){
+        downButtonState=0;
+        if(i>0){
+          i=i-1;
+          Serial.println("");
+          Serial.print("Perscription Number: ");
+          Serial.println(i);
+          Serial.println("");
+          delay(1000);
+        }
+        else{
+          Serial.println("");
+          Serial.println("Perscription Number is out of range");
+          Serial.println("");
+          digitalWrite(problemLED, HIGH);
+          delay(100);  
+          digitalWrite(problemLED, LOW);
+        }
+      }
+    }
+}
+// Void Lens
+void lens() {
+  AMP=tempAMP;
+  if(AMP<256 && AMP>-1){
+    Wire.beginTransmission(lens_address);//Send request for communication
+    Wire.write(AMP);
+    Wire.endTransmission();
+    Serial.print("AMP: ");
+    Serial.print(AMP);
+    Serial.print("       ");
+    Serial.print("Voltage Out: ");
+    Serial.println(9.8+AMP*.205);
+  }
+  else{
+    Serial.println("AMP is out of Range");
+    digitalWrite(problemLED, HIGH);
+    delay(100);  
+    digitalWrite(problemLED, LOW);
+    if(AMP<=-1){
+       tempAMP=tempAMP+voltageIncrement;
+    }
+    if(AMP>=256){
+       tempAMP=tempAMP-voltageIncrement;
+    }
+  }
+}
+// Void Measure
+void measure() {
+    if (irrecv.decode(&results)){ // have we received an IR signal?
+      translateIR_1(); 
+      irrecv.resume();
+      if(irValue==0){
+        upButtonState = digitalRead(upButtonPin); //Measure user input for up button
+        downButtonState = digitalRead(downButtonPin); //Measure user input for down button
+        enterButtonState = digitalRead(enterButtonPin); //Measure user input for enter button
+      }
+      if(irValue==1){
+        upButtonState = 1;
+        downButtonState = 0;
+        enterButtonState = 0;
+      }
+      if(irValue==2){
+        upButtonState = 0;
+        downButtonState = 1;
+        enterButtonState = 0;
+      }
+      if(irValue==3){
+        upButtonState = 0;
+        downButtonState = 0;
+        enterButtonState = 3;
+      }
+    }
+  }
+// IR decode
+void translateIR_1(){ // takes action based on IR code received   // describing Remote IR codes 
+  switch(results.value){
+    case 16753245:   {Serial.println("POWER");   setup();   break;}
+    case 16720605:   {Serial.println("REVERSE"); irValue=2; break;}  
+    case 16761405:   {Serial.println("FORWARD"); irValue=1; break;}
+    case 16769055:   {Serial.println("DOWN");    irValue=2; break;}
+    case 16748655:   {Serial.println("UP");      irValue=1; break;}
+    case 16736925:   {Serial.println("Vol+");    irValue=1; break;}
+    case 16754775:   {Serial.println("VOL-");    irValue=2; break;}
+    case 16712445:   {Serial.println("PAUSE");   irValue=3; break;}
+    case 4294967295: {Serial.println("HOLD");    break;}
+
+    default:         {Serial.println("Default"); irValue=0; break;}
+  } 
+}
